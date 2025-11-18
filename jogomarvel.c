@@ -284,7 +284,7 @@ REPETE:
 
             /* === RESPONDER === */
             if (esc == 1) {
-                printf("\nDigite sua resposta (1-4): ");
+                printf("\nDigite sua resposta (A - D): ");
                 int r; scanf("%d", &r); getchar();
 
                 bool acertou = (r == perguntas[i].resposta);
