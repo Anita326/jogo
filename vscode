@@ -1,0 +1,498 @@
+#include <stdio.h> 
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
+
+#define MAX_PERGUNTAS 100
+
+typedef struct {
+    char questao[300];
+    char alternativas[4][150];
+    int resposta;
+    char dica[200];
+    int nivel;   // 1 = principal, 2 = secundária (só usada na troca)
+} Pergunta;
+
+#ifdef _WIN32
+#define LIMPAR "cls"
+#else
+#define LIMPAR "clear"
+#endif
+
+void limparTela() {
+    system(LIMPAR);
+}
+
+void pausa() {
+    printf("\nPressione ENTER para continuar...");
+    getchar();
+}
+
+/* ---------- LEITURA DE ARQUIVO SIMPLES ---------- */
+char *lerArquivoTexto(const char *nome) {
+    FILE *f = fopen(nome, "rb");
+    if (!f) return NULL;
+
+    fseek(f, 0, SEEK_END);
+    long tam = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    char *buf = malloc(tam + 1);
+    fread(buf, 1, tam, f);
+    buf[tam] = '\0';
+    fclose(f);
+    return buf;
+}
+
+/* ---------- EXTRATOR DE STRING ---------- */
+int extrairString(const char *txt, const char *chave, int pos, char *dest, int max) {
+    const char *p = strstr(txt + pos, chave);
+    if (!p) return -1;
+
+    p = strchr(p, ':');
+    while (*p && *p != '"') p++;
+    p++;
+
+    const char *q = p;
+    while (*q && *q != '"') q++;
+
+    int len = q - p;
+    if (len >= max) len = max - 1;
+
+    strncpy(dest, p, len);
+    dest[len] = '\0';
+
+    return q - txt;
+}
+
+/* ---------- EXTRATOR DE ALTERNATIVAS ---------- */
+int extrairAlternativas(const char *txt, int pos, char dest[4][150]) {
+    const char *p = strstr(txt + pos, "\"alternativas\"");
+    p = strchr(p, '[') + 1;
+
+    int i = 0;
+    while (*p && *p != ']' && i < 4) {
+        while (*p && *p != '"') p++;
+        p++;
+
+        const char *q = p;
+        while (*q && *q != '"') q++;
+
+        int len = q - p;
+        if (len > 149) len = 149;
+
+        strncpy(dest[i], p, len);
+        dest[i][len] = '\0';
+
+        p = q + 1;
+        i++;
+    }
+    return i;
+}
+
+/* ---------- EXTRATOR DE INTEIRO ---------- */
+int extrairInt(const char *txt, const char *chave, int pos, int *out) {
+    const char *p = strstr(txt + pos, chave);
+    p = strchr(p, ':') + 1;
+
+    sscanf(p, "%d", out);
+    while (*p >= '0' && *p <= '9') p++;
+
+    return p - txt;
+}
+
+/* ---------- CARREGAR JSON ---------- */
+int carregarPerguntasJSON(const char *arquivo, Pergunta perguntas[]) {
+
+    char *txt = lerArquivoTexto(arquivo);
+    if (!txt) return 0;
+
+    int pos = 0, count = 0;
+
+    while (txt[pos]) {
+        const char *obj = strstr(txt + pos, "{");
+        if (!obj) break;
+
+        int base = obj - txt;
+
+        extrairString(txt, "\"questao\"", base, perguntas[count].questao, 300);
+        extrairAlternativas(txt, base, perguntas[count].alternativas);
+        extrairInt(txt, "\"resposta\"", base, &perguntas[count].resposta);
+        extrairString(txt, "\"dica\"", base, perguntas[count].dica, 200);
+
+        /* DEFINE NÍVEL AUTOMÁTICO */
+        perguntas[count].nivel = (count < 10 ? 1 : 2);
+
+        count++;
+        pos = base + 1;
+    }
+
+    free(txt);
+    return count;
+}
+
+/* -------- INTRODUÇÃO --------*/
+void mostrarIntroducao() {
+    limparTela();
+    printf("=== MISSÃO MARVEL ===\n\n");
+
+    printf("O universo está em perigo. Thanos reuniu as Joias do Infinito e ameaça destruir tudo o que conhecemos.\n");
+    printf("Os Vingadores contam com você, herói, para impedir que a calamidade aconteça.\n\n");
+
+    printf("Cada pergunta respondida corretamente fortalece a equipe.\n");
+    printf("Mas cuidado: o tempo está se esgotando, e apenas uma dica, um pulo e uma troca estão disponíveis — use-os com sabedoria.\n\n");
+
+    printf("Prepare-se. Sua missão começa agora.\n");
+    printf("Que a coragem dos Vingadores guie suas escolhas!\n\n");
+
+    printf("Pressione ENTER para acessar o menu e iniciar sua missão...");
+    getchar();  // espera ENTER corretamente
+}
+
+
+
+
+
+/* ---------- REGRAS ---------- */
+void mostrarRegras() {
+    limparTela();
+    printf("===== REGRAS DO JOGO =====\n");
+    printf("- O mundo está em perigo, para ajudar os vingadores você deve responder 10 perguntas segindo as seguintes regras:\n");
+    printf("1- O jogo se inicia com 2 vidas\n");
+    printf("2- Você possui 3 açoes especiais:\n");
+    printf("- 1 pulo de questão\n");
+    printf("- 1 troca de pergunta\n");
+    printf("- 1 dica\n\n");
+    printf("1) Voltar para menu princípal\nEscolha: ");
+    int x; scanf("%d", &x); getchar();
+}
+
+/* ==========================================================
+                     JOGO PRINCIPAL
+   ========================================================== */
+
+int main() {
+
+    limparTela();
+    mostrarIntroducao();
+
+    printf("=== MISSÃO MARVEL ===\n\n");
+
+
+    Pergunta perguntas[MAX_PERGUNTAS];
+    int total = carregarPerguntasJSON("perguntas.json", perguntas);
+
+    if (total < 20) {
+        printf("ERRO: São necessárias 10 principais + 10 secundárias.\n");
+        return 1;
+    }
+
+    while (1) {
+
+        printf("\nMENU:\n1 - Jogar\n2 - Regras\n3 - Sair\nEscolha: ");
+        int menu; scanf("%d", &menu); getchar();
+
+        if (menu == 3) break;
+        if (menu == 2) { mostrarRegras(); continue; }
+        if (menu != 1) continue;
+
+        /* --- VARIÁVEIS DA PARTIDA --- */
+        int vidas = 2, pontos = 0;
+        bool dicaUsada = false;
+        bool puloUsado = false;
+        bool trocaUsada = false;
+
+        int idxSecundaria = 10; // começa depois das 10 principais
+
+        /* ------------ LOOP DAS 10 PERGUNTAS PRINCIPAIS ------------ */
+        for (int i = 0; i < 10 && vidas > 0; i++) {
+
+REPETE:
+
+            limparTela();
+
+            printf("Vidas: %d | Dica: %d | Pulo: %d | Troca: %d\n",
+                   vidas,
+                   dicaUsada ? 0 : 1,
+                   puloUsado ? 0 : 1,
+                   trocaUsada ? 0 : 1);
+
+            printf("\nPergunta %d/10\n", i+1);
+            printf("Nível: %d\n\n", perguntas[i].nivel);
+            printf("%s\n\n", perguntas[i].questao);
+
+            for (int a = 0; a < 4; a++)
+                printf("%d) %s\n", a+1, perguntas[i].alternativas[a]);
+
+            printf("\n1=Responder  2=Dica  3=Trocar  4=Pular  5=Desistir\nEscolha: ");
+            int esc; scanf("%d", &esc); getchar();
+
+            /* === DICA === */
+            if (esc == 2) {
+                if (dicaUsada) {
+                    printf("\nVocê já usou sua dica!\n");
+                    pausa();
+                    goto REPETE;
+                }
+
+                dicaUsada = true;
+                printf("\n Dica: %s\n", perguntas[i].dica);
+                pausa();
+                goto REPETE;
+            }
+
+            /* === PULAR === */  
+            if (esc == 4) {
+                if (puloUsado) {
+                    printf("\nVocê já usou o pulo!\n");
+                    pausa();
+                    goto REPETE;
+                }
+                puloUsado = true;
+                continue;  // vai para a próxima pergunta
+            }
+
+            /* === TROCAR === */
+            if (esc == 3) {
+                if (trocaUsada) {
+                    printf("\nVocê já usou a troca!\n");
+                    pausa();
+                    goto REPETE;
+                }
+
+                if (idxSecundaria >= total) {
+                    printf("\nSem perguntas secundárias restantes!\n");
+                    pausa();
+                    goto REPETE;
+                }
+
+                trocaUsada = true;
+
+                Pergunta temp = perguntas[i];
+                perguntas[i] = perguntas[idxSecundaria];
+                perguntas[idxSecundaria] = temp;
+
+                idxSecundaria++;
+
+                printf("\nPergunta substituída!\n");
+                pausa();
+                goto REPETE;
+            }
+
+            /* === DESISTIR === */
+            if (esc == 5) break;
+
+            /* === RESPONDER === */
+            if (esc == 1) {
+                printf("\nDigite sua resposta (1-4): ");
+                int r; scanf("%d", &r); getchar();
+
+                bool acertou = (r == perguntas[i].resposta);
+
+                if (acertou) {
+                    if (perguntas[i].nivel == 1) pontos++;
+                    printf("\n Correto!\n");
+                } else {
+                    vidas--;
+                    printf("\n Errado! Resposta correta: %d) %s\n",
+                           perguntas[i].resposta,
+                           perguntas[i].alternativas[perguntas[i].resposta - 1]);
+                }
+
+                pausa();
+            }
+        }
+
+
+/* ----------- RESULTADO FINAL ----------- */
+limparTela();
+printf("===== RESULTADO =====\n");
+printf("Pontuação final: %d\n\n", pontos);
+
+/* ----  VITÓRIA / DERROTA ---- */
+
+if (pontos >= 7) {
+    printf("Impressionante! Você alcançou %d pontos!\n", pontos);
+    printf("A força dos Vingadores corre em suas veias. Sua coragem virou o jogo.\n");
+    printf("A ameaça foi contida e o universo respira aliviado graças às suas decisões.\n");
+}
+else if (pontos <= -7) {
+    printf("Você fez %d pontos.\n", pontos);
+    printf("Thanos avançou como uma tempestade inevitável. Mesmo com bravura, você não conseguiu impedi-lo.\n");
+    printf("Mas os Vingadores nunca desistem. A galáxia ainda precisa de você.\n");
+}
+else {
+    printf("Você fez %d pontos.\n", pontos);
+    printf("Você lutou bem, mas o poder das Joias do Infinito exige ainda mais determinação.\n");
+    printf("Continue ao lado dos Vingadores e volte mais forte. A próxima batalha pode mudar tudo.\n");
+}
+
+pausa();
+}
+
+
+return 0;
+}
+[
+  {
+    "questao": "Qual é o nome verdadeiro do Homem de Ferro?",
+    "alternativas": ["Bruce Banner","Tony Stark","Steve Rogers","Peter Parker"],
+    "resposta": "B",
+    "dica": "Ele é um gênio bilionário que herdou uma indústria de armas e criou uma armadura.",
+    "nivel": "facil",
+    "principal": true
+  },
+  {
+    "questao": "Quem é o deus do trovão entre os Vingadores?",
+    "alternativas": ["Loki","Thor","Hela","Odin"],
+    "resposta": "B",
+    "dica": "É de Asgard e tem um irmão famoso por suas mentiras.",
+    "nivel": "facil",
+    "principal": true
+  },
+  {
+    "questao": "Em Vingadores: Guerra Infinita (2018), qual Vingador tenta impedir Thanos?",
+    "alternativas": ["Thor","Capitão América","Homem de Ferro","Doutor Estranho"],
+    "resposta": "C",
+    "dica": "Ele é o líder tecnológico do grupo.",
+    "nivel": "medio",
+    "principal": true
+  },
+  {
+    "questao": "Qual joia do infinito fica na testa do Visão?",
+    "alternativas": ["Joia do Tempo","Joia da Realidade","Joia da Mente","Joia da Alma"],
+    "resposta": "C",
+    "dica": "Essa joia é amarela e foi originalmente encontrada dentro do cetro de Loki.",
+    "nivel": "facil",
+    "principal": true
+  },
+  {
+    "questao": "Qual é o nome do escudo do Capitão América?",
+    "alternativas": ["Escudo de Adamantium","Escudo de Aço","Escudo de Vibranium","Escudo de Titânio"],
+    "resposta": "C",
+    "dica": "É feito de um metal quase indestrutível encontrado apenas em Wakanda.",
+    "nivel": "facil",
+    "principal": true
+  },
+  {
+    "questao": "Qual personagem diz \"Eu sou inevitável\"?",
+    "alternativas": ["Tony Stark","Thanos","Loki","Ultron"],
+    "resposta": "B",
+    "dica": "Essa frase é dita antes de ele tentar usar as Joias do Infinito.",
+    "nivel": "medio",
+    "principal": true
+  },
+  {
+    "questao": "Em Vingadores: Ultimato (2019), quem é o primeiro a empunhar o Mjolnir além de Thor?",
+    "alternativas": ["Capitão América","Tony Stark","Hulk","Viúva Negra"],
+    "resposta": "A",
+    "dica": "Quando ele levanta o martelo, até o próprio deus do trovão comemora.",
+    "nivel": "medio",
+    "principal": true
+  },
+  {
+    "questao": "Qual personagem é o guardião da Joia do Tempo em Doutor Estranho (2016)?",
+    "alternativas": ["Wong","Anciã","Mordo","Kaecilius"],
+    "resposta": "B",
+    "dica": "Ela ensina ao Doutor Estranho como manipular o tempo.",
+    "nivel": "facil",
+    "principal": true
+  },
+  {
+    "questao": "Quem se sacrifica para obter a Joia da Alma em Guerra Infinita?",
+    "alternativas": ["Gamora","Natasha","Vision","Wanda"],
+    "resposta": "A",
+    "dica": "Era filha adotiva de Thanos.",
+    "nivel": "medio",
+    "principal": true
+  },
+  {
+    "questao": "Quem destrói Thanos em Ultimato?",
+    "alternativas": ["Tony Stark","Steve Rogers","Thor","Hulk"],
+    "resposta": "A",
+    "dica": "Usa a Manopla do Infinito.",
+    "nivel": "dificil",
+    "principal": true
+  },
+
+  {
+    "questao": "Quem é o especialista em arco e flecha nos Vingadores?",
+    "alternativas": ["Gavião Arqueiro","Hulk","Thor","Homem de Ferro"],
+    "resposta": "A",
+    "dica": "Sempre mira com extrema precisão.",
+    "nivel": "facil",
+    "principal": false
+  },
+  {
+    "questao": "Qual Vingador consegue voar e lançar rajadas de energia das mãos?",
+    "alternativas": ["Homem de Ferro","Capitão América","Gavião Arqueiro","Hulk"],
+    "resposta": "A",
+    "dica": "Usa sua armadura tecnológica.",
+    "nivel": "facil",
+    "principal": false
+  },
+  {
+    "questao": "Qual personagem tem garras retráteis feitas de Vibranium?",
+    "alternativas": ["Pantera Negra","Wolverine","Capitão América","Homem-Aranha"],
+    "resposta": "A",
+    "dica": "Rei de Wakanda.",
+    "nivel": "medio",
+    "principal": false
+  },
+  {
+    "questao": "Quem empunha o escudo do Capitão América durante a batalha final?",
+    "alternativas": ["Steve Rogers","Sam Wilson","Bucky Barnes","Tony Stark"],
+    "resposta": "B",
+    "dica": "Ele prova ser digno do escudo.",
+    "nivel": "medio",
+    "principal": false
+  },
+  {
+    "questao": "Quem destrói a Joia da Mente no final de Guerra Infinita?",
+    "alternativas": ["Visão","Wanda","Tony Stark","Thor"],
+    "resposta": "A",
+    "dica": "Feito por suas próprias mãos para proteger o mundo.",
+    "nivel": "medio",
+    "principal": false
+  },
+  {
+    "questao": "Qual é o verdadeiro nome de Pantera Negra?",
+    "alternativas": ["T'Challa","N'Jadaka","Erik Killmonger","M'Baku"],
+    "resposta": "A",
+    "dica": "Rei de Wakanda.",
+    "nivel": "facil",
+    "principal": false
+  },
+  {
+    "questao": "Quem se sacrifica para obter a Joia do Tempo?",
+    "alternativas": ["Doctor Strange","Wong","Mordo","Kaecilius"],
+    "resposta": "A",
+    "dica": "Protege o tempo do universo.",
+    "nivel": "medio",
+    "principal": false
+  },
+  {
+    "questao": "Qual Vingador possui super força e luta contra Thanos em Titan?",
+    "alternativas": ["Hulk","Thor","Capitão América","Homem de Ferro"],
+    "resposta": "A",
+    "dica": "Gigante verde do grupo.",
+    "nivel": "facil",
+    "principal": false
+  },
+  {
+    "questao": "Quem lidera a equipe para resgatar a Joia da Alma?",
+    "alternativas": ["Gamora","Nebula","Tony Stark","Steve Rogers"],
+    "resposta": "A",
+    "dica": "Filha adotiva de Thanos.",
+    "nivel": "medio",
+    "principal": false
+  },
+  {
+    "questao": "Qual personagem consegue manipular a mente dos outros?",
+    "alternativas": ["Visão","Wanda","Loki","Ultron"],
+    "resposta": "B",
+    "dica": "Ela tem poderes de controle mental.",
+    "nivel": "medio",
+    "principal": false
+  }
+]
