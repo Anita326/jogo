@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <windows.h>
 
 #define MAX_PERGUNTAS 100
 
@@ -292,6 +293,7 @@ REPETE:
                 if (acertou) {
                     if (perguntas[i].nivel == 1) pontos++;
                     printf("\n Correto!\n");
+                    Sleep(1000);
                 } else {
                     vidas--;
                     printf("\n Errado! Resposta correta: %d) %s\n",
